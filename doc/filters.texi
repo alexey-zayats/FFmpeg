@@ -9253,6 +9253,44 @@ lutyuv=u='(val-maxval/2)*2+maxval/2':v='(val-maxval/2)*2+maxval/2'
 @end example
 @end itemize
 
+@section lut2
+
+Compute and apply a lookup table from two video inputs.
+
+This filter accepts the following parameters:
+@table @option
+@item c0
+set first pixel component expression
+@item c1
+set second pixel component expression
+@item c2
+set third pixel component expression
+@item c3
+set fourth pixel component expression, corresponds to the alpha component
+@end table
+
+Each of them specifies the expression to use for computing the lookup table for
+the corresponding pixel component values.
+
+The exact component associated to each of the @var{c*} options depends on the
+format in inputs.
+
+The expressions can contain the following constants:
+
+@table @option
+@item w
+@item h
+The input width and height.
+
+@item x
+The first input value for the pixel component.
+
+@item y
+The second input value for the pixel component.
+@end table
+
+All expressions default to "x".
+
 @section maskedclamp
 
 Clamp the first input stream with the second input and third input stream.
@@ -14829,7 +14867,8 @@ ffplay -f lavfi life=s=300x200:mold=10:r=60:ratio=0.1:death_color=#C83232:life_c
 @anchor{smptehdbars}
 @anchor{testsrc}
 @anchor{testsrc2}
-@section allrgb, allyuv, color, haldclutsrc, nullsrc, rgbtestsrc, smptebars, smptehdbars, testsrc, testsrc2
+@anchor{yuvtestsrc}
+@section allrgb, allyuv, color, haldclutsrc, nullsrc, rgbtestsrc, smptebars, smptehdbars, testsrc, testsrc2, yuvtestsrc
 
 The @code{allrgb} source returns frames of size 4096x4096 of all rgb colors.
 
@@ -14861,6 +14900,9 @@ intended for testing purposes.
 The @code{testsrc2} source is similar to testsrc, but supports more
 pixel formats instead of just @code{rgb24}. This allows using it as an
 input for other tests without requiring a format conversion.
+
+The @code{yuvtestsrc} source generates an YUV test pattern. You should
+see a y, cb and cr stripe from top to bottom.
 
 The sources accept the following parameters:
 

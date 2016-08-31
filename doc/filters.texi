@@ -1169,7 +1169,7 @@ Each equalizer band is separated by '|'.
 Set channel number to which equalization will be applied.
 If input doesn't have that channel the entry is ignored.
 
-@item cf
+@item f
 Set central frequency for band.
 If input doesn't have that frequency the entry is ignored.
 
@@ -1179,7 +1179,7 @@ Set band width in hertz.
 @item g
 Set band gain in dB.
 
-@item f
+@item t
 Set filter type for band, optional, can be:
 
 @table @samp
@@ -4397,6 +4397,9 @@ threshold B is designed to react on continuous changes in the input signal.
 @item s
 Set number of frames filter will use for averaging. Default is 33. Must be odd
 number in range [5, 129].
+
+@item p
+Set what planes of frame filter will use for averaging. Default is all.
 @end table
 
 @section bbox
@@ -9434,6 +9437,134 @@ format=rgb24,mergeplanes=0x000102:yuv444p
 @end example
 @end itemize
 
+@section mestimate
+
+Estimate and export motion vectors using block matching algorithms.
+Motion vectors are stored in frame side data to be used by other filters.
+
+This filter accepts the following options:
+@table @option
+@item method
+Specify the motion estimation method. Accepts one of the following values:
+
+@table @samp
+@item esa
+Exhaustive search algorithm.
+@item tss
+Three step search algorithm.
+@item tdls
+Two dimensional logarithmic search algorithm.
+@item ntss
+New three step search algorithm.
+@item fss
+Four step search algorithm.
+@item ds
+Diamond search algorithm.
+@item hexbs
+Hexagon-based search algorithm.
+@item epzs
+Enhanced predictive zonal search algorithm.
+@item umh
+Uneven multi-hexagon search algorithm.
+@end table
+Default value is @samp{esa}.
+
+@item mb_size
+Macroblock size. Default @code{16}.
+
+@item search_param
+Search parameter. Default @code{7}.
+@end table
+
+@section minterpolate
+
+Convert the video to specified frame rate using motion interpolation.
+
+This filter accepts the following options:
+@table @option
+@item fps
+Specify the output frame rate. This can be rational e.g. @code{60000/1001}. Frames are dropped if @var{fps} is lower than source fps. Default @code{60}.
+
+@item mi_mode
+Motion interpolation mode. Following values are accepted:
+@table @samp
+@item dup
+Duplicate previous or next frame for interpolating new ones.
+@item blend
+Blend source frames. Interpolated frame is mean of previous and next frames.
+@item mci
+Motion compensated interpolation. Following options are effective when this mode is selected:
+
+@table @samp
+@item mc_mode
+Motion compensation mode. Following values are accepted:
+@table @samp
+@item obmc
+Overlapped block motion compensation.
+@item aobmc
+Adaptive overlapped block motion compensation. Window weighting coefficients are controlled adaptively according to the reliabilities of the neighboring motion vectors to reduce oversmoothing.
+@end table
+Default mode is @samp{obmc}.
+
+@item me_mode
+Motion estimation mode. Following values are accepted:
+@table @samp
+@item bidir
+Bidirectional motion estimation. Motion vectors are estimated for each source frame in both forward and backward directions.
+@item bilat
+Bilateral motion estimation. Motion vectors are estimated directly for interpolated frame.
+@end table
+Default mode is @samp{bilat}.
+
+@item me
+The algorithm to be used for motion estimation. Following values are accepted:
+@table @samp
+@item esa
+Exhaustive search algorithm.
+@item tss
+Three step search algorithm.
+@item tdls
+Two dimensional logarithmic search algorithm.
+@item ntss
+New three step search algorithm.
+@item fss
+Four step search algorithm.
+@item ds
+Diamond search algorithm.
+@item hexbs
+Hexagon-based search algorithm.
+@item epzs
+Enhanced predictive zonal search algorithm.
+@item umh
+Uneven multi-hexagon search algorithm.
+@end table
+Default algorithm is @samp{epzs}.
+
+@item mb_size
+Macroblock size. Default @code{16}.
+
+@item search_param
+Motion estimation search parameter. Default @code{32}.
+
+@item vsmbc
+Enable variable-size block motion compensation. Motion estimation is applied with smaller block sizes at object boundaries in order to make the them less blur. Default is @code{0} (disabled).
+@end table
+@end table
+
+@item scd
+Scene change detection method. Scene change leads motion vectors to be in random direction. Scene change detection replace interpolated frames by duplicate ones. May not be needed for other modes. Following values are accepted:
+@table @samp
+@item none
+Disable scene change detection.
+@item fdiff
+Frame difference. Corresponding pixel values are compared and if it statisfies @var{scd_threshold} scene change is detected.
+@end table
+Default method is @samp{fdiff}.
+
+@item scd_threshold
+Scene change detection threshold. Default is @code{5.0}.
+@end table
+
 @section mpdecimate
 
 Drop frames that do not differ greatly from the previous frame in
@@ -13249,6 +13380,53 @@ that value the speed drops by a factor of approximately 2.  Default value is
 @item qp
 Force a constant quantization parameter. If not set, the filter will use the QP
 from the video stream (if available).
+@end table
+
+@section vaguedenoiser
+
+Apply a wavelet based denoiser.
+
+It transforms each frame from the video input into the wavelet domain,
+using Cohen-Daubechies-Feauveau 9/7. Then it applies some filtering to
+the obtained coefficients. It does an inverse wavelet transform after.
+Due to wavelet properties, it should give a nice smoothed result, and
+reduced noise, without blurring picture features.
+
+This filter accepts the following options:
+
+@table @option
+@item threshold
+The filtering strength. The higher, the more filtered the video will be.
+Hard thresholding can use a higher threshold than soft thresholding
+before the video looks overfiltered.
+
+@item method
+The filtering method the filter will use.
+
+It accepts the following values:
+@table @samp
+@item hard
+All values under the threshold will be zeroed.
+
+@item soft
+All values under the threshold will be zeroed. All values above will be
+reduced by the threshold.
+
+@item garrote
+Scales or nullifies coefficients - intermediary between (more) soft and
+(less) hard thresholding.
+@end table
+
+@item nsteps
+Number of times, the wavelet will decompose the picture. Picture can't
+be decomposed beyond a particular point (typically, 8 for a 640x480
+frame - as 2^9 = 512 > 480)
+
+@item percent
+Partial of full denoising (limited coefficients shrinking), from 0 to 100.
+
+@item planes
+A list of the planes to process. By default all planes are processed.
 @end table
 
 @section vectorscope

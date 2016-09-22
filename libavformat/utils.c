@@ -1937,6 +1937,16 @@ int ff_index_search_timestamp(const AVIndexEntry *entries, int nb_entries,
 
     while (b - a > 1) {
         m         = (a + b) >> 1;
+
+        // Search for the next non-discarded packet.
+        while ((entries[m].flags & AVINDEX_DISCARD_FRAME) && m < b) {
+            m++;
+            if (m == b && entries[m].timestamp >= wanted_timestamp) {
+                m = b - 1;
+                break;
+            }
+        }
+
         timestamp = entries[m].timestamp;
         if (timestamp >= wanted_timestamp)
             b = m;
@@ -5329,7 +5339,7 @@ int avformat_transfer_internal_stream_timing_info(const AVOutputFormat *ofmt,
         }
     }
 
-    if (enc_ctx->codec_tag == AV_RL32("tmcd")
+    if ((enc_ctx->codec_tag == AV_RL32("tmcd") || ost->codecpar->codec_tag == AV_RL32("tmcd"))
         && dec_ctx->time_base.num < dec_ctx->time_base.den
         && dec_ctx->time_base.num > 0
         && 121LL*dec_ctx->time_base.num > dec_ctx->time_base.den) {

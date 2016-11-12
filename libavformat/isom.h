@@ -179,6 +179,7 @@ typedef struct MOVStreamContext {
     int32_t *display_matrix;
     uint32_t format;
 
+    int has_sidx;  // If there is an sidx entry for this stream.
     struct {
         int use_subsamples;
         uint8_t* auxiliary_info;
@@ -210,7 +211,8 @@ typedef struct MOVContext {
     unsigned trex_count;
     int itunes_metadata;  ///< metadata are itunes style
     int handbrake_version;
-    int chapter_track;
+    int *chapter_tracks;
+    unsigned int nb_chapter_tracks;
     int use_absolute_path;
     int ignore_editlist;
     int ignore_chapters;

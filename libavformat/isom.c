@@ -488,9 +488,14 @@ int ff_mp4_read_dec_config_descr(AVFormatContext *fc, AVStream *st, AVIOContext 
     avio_rb24(pb); /* buffer size db */
 
     v = avio_rb32(pb);
-    // TODO: fix this
-    //if (v < INT32_MAX)
-    //    st->codecpar->rc_max_rate = v;
+
+    // TODO: fix this with codecpar
+#if FF_API_LAVF_AVCTX
+FF_DISABLE_DEPRECATION_WARNINGS
+    if (v < INT32_MAX)
+        st->codec->rc_max_rate = v;
+FF_ENABLE_DEPRECATION_WARNINGS
+#endif
 
     st->codecpar->bit_rate = avio_rb32(pb); /* avg bitrate */
 
@@ -508,8 +513,10 @@ int ff_mp4_read_dec_config_descr(AVFormatContext *fc, AVStream *st, AVIOContext 
             return ret;
         if (st->codecpar->codec_id == AV_CODEC_ID_AAC) {
             MPEG4AudioConfig cfg = {0};
-            avpriv_mpeg4audio_get_config(&cfg, st->codecpar->extradata,
-                                         st->codecpar->extradata_size * 8, 1);
+            ret = avpriv_mpeg4audio_get_config(&cfg, st->codecpar->extradata,
+                                               st->codecpar->extradata_size * 8, 1);
+            if (ret < 0)
+                return ret;
             st->codecpar->channels = cfg.channels;
             if (cfg.object_type == 29 && cfg.sampling_index < 3) // old mp3on4
                 st->codecpar->sample_rate = avpriv_mpa_freq_tab[cfg.sampling_index];

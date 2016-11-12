@@ -560,6 +560,27 @@ static const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
         },
         .flags = AV_PIX_FMT_FLAG_RGB,
     },
+    [AV_PIX_FMT_GRAY12BE] = {
+        .name = "gray12be",
+        .nb_components = 1,
+        .log2_chroma_w = 0,
+        .log2_chroma_h = 0,
+        .comp = {
+            { 0, 2, 0, 0, 12, 1, 11, 1 },       /* Y */
+        },
+        .flags = AV_PIX_FMT_FLAG_BE,
+        .alias = "y12be",
+    },
+    [AV_PIX_FMT_GRAY12LE] = {
+        .name = "gray12le",
+        .nb_components = 1,
+        .log2_chroma_w = 0,
+        .log2_chroma_h = 0,
+        .comp = {
+            { 0, 2, 0, 0, 12, 1, 11, 1 },       /* Y */
+        },
+        .alias = "y12le",
+    },
     [AV_PIX_FMT_GRAY16BE] = {
         .name = "gray16be",
         .nb_components = 1,
@@ -2115,6 +2136,8 @@ static const char *color_primaries_names[AVCOL_PRI_NB] = {
     [AVCOL_PRI_FILM] = "film",
     [AVCOL_PRI_BT2020] = "bt2020",
     [AVCOL_PRI_SMPTEST428_1] = "smpte428-1",
+    [AVCOL_PRI_SMPTE431] = "smpte431",
+    [AVCOL_PRI_SMPTE432] = "smpte432",
 };
 
 static const char *color_transfer_names[] = {
@@ -2151,6 +2174,7 @@ static const char *color_space_names[] = {
     [AVCOL_SPC_YCOCG] = "ycgco",
     [AVCOL_SPC_BT2020_NCL] = "bt2020nc",
     [AVCOL_SPC_BT2020_CL] = "bt2020c",
+    [AVCOL_SPC_SMPTE2085] = "smpte2085",
 };
 
 static const char *chroma_location_names[] = {

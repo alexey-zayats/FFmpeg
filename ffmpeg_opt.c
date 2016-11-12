@@ -1229,8 +1229,8 @@ static OutputStream *new_output_stream(OptionsContext *o, AVFormatContext *oc, e
     OutputStream *ost;
     AVStream *st = avformat_new_stream(oc, NULL);
     int idx      = oc->nb_streams - 1, ret = 0;
-    char *bsf = NULL, *next, *codec_tag = NULL;
-    AVBitStreamFilterContext *bsfc, *bsfc_prev = NULL;
+    const char *bsfs = NULL;
+    char *next, *codec_tag = NULL;
     double qscale = -1;
     int i;
 
@@ -1319,29 +1319,62 @@ static OutputStream *new_output_stream(OptionsContext *o, AVFormatContext *oc, e
     ost->copy_prior_start = -1;
     MATCH_PER_STREAM_OPT(copy_prior_start, i, ost->copy_prior_start, oc ,st);
 
-    MATCH_PER_STREAM_OPT(bitstream_filters, str, bsf, oc, st);
-    while (bsf) {
-        char *arg = NULL;
-        if (next = strchr(bsf, ','))
-            *next++ = 0;
-        if (arg = strchr(bsf, '='))
-            *arg++ = 0;
-        if (!(bsfc = av_bitstream_filter_init(bsf))) {
-            av_log(NULL, AV_LOG_FATAL, "Unknown bitstream filter %s\n", bsf);
+    MATCH_PER_STREAM_OPT(bitstream_filters, str, bsfs, oc, st);
+    while (bsfs && *bsfs) {
+        const AVBitStreamFilter *filter;
+        char *bsf, *bsf_options_str, *bsf_name;
+
+        bsf = av_get_token(&bsfs, ",");
+        if (!bsf)
+            exit_program(1);
+        bsf_name = av_strtok(bsf, "=", &bsf_options_str);
+        if (!bsf_name)
+            exit_program(1);
+
+        filter = av_bsf_get_by_name(bsf_name);
+        if (!filter) {
+            av_log(NULL, AV_LOG_FATAL, "Unknown bitstream filter %s\n", bsf_name);
             exit_program(1);
         }
-        if (bsfc_prev)
-            bsfc_prev->next = bsfc;
-        else
-            ost->bitstream_filters = bsfc;
-        if (arg)
-            if (!(bsfc->args = av_strdup(arg))) {
-                av_log(NULL, AV_LOG_FATAL, "Bitstream filter memory allocation failed\n");
+
+        ost->bsf_ctx = av_realloc_array(ost->bsf_ctx,
+                                        ost->nb_bitstream_filters + 1,
+                                        sizeof(*ost->bsf_ctx));
+        if (!ost->bsf_ctx)
+            exit_program(1);
+
+        ret = av_bsf_alloc(filter, &ost->bsf_ctx[ost->nb_bitstream_filters]);
+        if (ret < 0) {
+            av_log(NULL, AV_LOG_ERROR, "Error allocating a bitstream filter context\n");
+            exit_program(1);
+        }
+
+        ost->nb_bitstream_filters++;
+
+        if (bsf_options_str && filter->priv_class) {
+            const AVOption *opt = av_opt_next(ost->bsf_ctx[ost->nb_bitstream_filters-1]->priv_data, NULL);
+            const char * shorthand[2] = {NULL};
+
+            if (opt)
+                shorthand[0] = opt->name;
+
+            ret = av_opt_set_from_string(ost->bsf_ctx[ost->nb_bitstream_filters-1]->priv_data, bsf_options_str, shorthand, "=", ":");
+            if (ret < 0) {
+                av_log(NULL, AV_LOG_ERROR, "Error parsing options for bitstream filter %s\n", bsf_name);
                 exit_program(1);
             }
+        }
+        av_freep(&bsf);
 
-        bsfc_prev = bsfc;
-        bsf       = next;
+        if (*bsfs)
+            bsfs++;
+    }
+    if (ost->nb_bitstream_filters) {
+        ost->bsf_extradata_updated = av_mallocz_array(ost->nb_bitstream_filters, sizeof(*ost->bsf_extradata_updated));
+        if (!ost->bsf_extradata_updated) {
+            av_log(NULL, AV_LOG_FATAL, "Bitstream filter memory allocation failed\n");
+            exit_program(1);
+        }
     }
 
     MATCH_PER_STREAM_OPT(codec_tags, str, codec_tag, oc, st);
@@ -1362,6 +1395,10 @@ static OutputStream *new_output_stream(OptionsContext *o, AVFormatContext *oc, e
     MATCH_PER_STREAM_OPT(disposition, str, ost->disposition, oc, st);
     ost->disposition = av_strdup(ost->disposition);
 
+    ost->max_muxing_queue_size = 128;
+    MATCH_PER_STREAM_OPT(max_muxing_queue_size, i, ost->max_muxing_queue_size, oc, st);
+    ost->max_muxing_queue_size *= sizeof(AVPacket);
+
     if (oc->oformat->flags & AVFMT_GLOBALHEADER)
         ost->enc_ctx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 
@@ -1380,6 +1417,10 @@ static OutputStream *new_output_stream(OptionsContext *o, AVFormatContext *oc, e
         input_streams[source_index]->st->discard = input_streams[source_index]->user_set_discard;
     }
     ost->last_mux_dts = AV_NOPTS_VALUE;
+
+    ost->muxing_queue = av_fifo_alloc(8 * sizeof(AVPacket));
+    if (!ost->muxing_queue)
+        exit_program(1);
 
     return ost;
 }
@@ -1967,12 +2008,28 @@ static int init_complex_filters(void)
 
 static int configure_complex_filters(void)
 {
-    int i, ret = 0;
+    int i, j, ret = 0;
 
-    for (i = 0; i < nb_filtergraphs; i++)
-        if (!filtergraph_is_simple(filtergraphs[i]) &&
-            (ret = configure_filtergraph(filtergraphs[i])) < 0)
+    for (i = 0; i < nb_filtergraphs; i++) {
+        FilterGraph *fg = filtergraphs[i];
+
+        if (filtergraph_is_simple(fg))
+            continue;
+
+        for (j = 0; j < fg->nb_inputs; j++) {
+            ret = ifilter_parameters_from_decoder(fg->inputs[j],
+                                                  fg->inputs[j]->ist->dec_ctx);
+            if (ret < 0) {
+                av_log(NULL, AV_LOG_ERROR,
+                       "Error initializing filtergraph %d input %d\n", i, j);
+                return ret;
+            }
+        }
+
+        ret = configure_filtergraph(filtergraphs[i]);
+        if (ret < 0)
             return ret;
+    }
     return 0;
 }
 
@@ -2267,6 +2324,7 @@ loop_end:
         avio_read(pb, attachment, len);
 
         ost = new_attachment_stream(o, oc, -1);
+        ost->stream_copy               = 0;
         ost->attachment_filename       = o->attachments[i];
         ost->st->codecpar->extradata      = attachment;
         ost->st->codecpar->extradata_size = len;
@@ -2276,6 +2334,7 @@ loop_end:
         avio_closep(&pb);
     }
 
+#if FF_API_LAVF_AVCTX
     for (i = nb_output_streams - oc->nb_streams; i < nb_output_streams; i++) { //for all streams of this output file
         AVDictionaryEntry *e;
         ost = output_streams[i];
@@ -2286,6 +2345,7 @@ loop_end:
             if (av_opt_set(ost->st->codec, "flags", e->value, 0) < 0)
                 exit_program(1);
     }
+#endif
 
     if (!oc->nb_streams && !(oc->oformat->flags & AVFMT_NOSTREAMS)) {
         av_dump_format(oc, nb_output_files - 1, oc->filename, 1);
@@ -3124,6 +3184,9 @@ int ffmpeg_parse_options(int argc, char **argv)
         goto fail;
     }
 
+    /* configure terminal and setup signal handlers */
+    term_init();
+
     /* open input files */
     ret = open_files(&octx.groups[GROUP_INFILE], "input", open_input_file);
     if (ret < 0) {
@@ -3318,12 +3381,16 @@ const OptionDef options[] = {
         "set profile", "profile" },
     { "filter",         HAS_ARG | OPT_STRING | OPT_SPEC | OPT_OUTPUT, { .off = OFFSET(filters) },
         "set stream filtergraph", "filter_graph" },
+    { "filter_threads",  HAS_ARG | OPT_INT,                          { &filter_nbthreads },
+        "number of non-complex filter threads" },
     { "filter_script",  HAS_ARG | OPT_STRING | OPT_SPEC | OPT_OUTPUT, { .off = OFFSET(filter_scripts) },
         "read stream filtergraph description from a file", "filename" },
     { "reinit_filter",  HAS_ARG | OPT_INT | OPT_SPEC | OPT_INPUT,    { .off = OFFSET(reinit_filters) },
         "reinit filtergraph on input parameter changes", "" },
     { "filter_complex", HAS_ARG | OPT_EXPERT,                        { .func_arg = opt_filter_complex },
         "create a complex filtergraph", "graph_description" },
+    { "filter_complex_threads", HAS_ARG | OPT_INT,                   { &filter_complex_nbthreads },
+        "number of threads for -filter_complex" },
     { "lavfi",          HAS_ARG | OPT_EXPERT,                        { .func_arg = opt_filter_complex },
         "create a complex filtergraph", "graph_description" },
     { "filter_complex_script", HAS_ARG | OPT_EXPERT,                 { .func_arg = opt_filter_complex_script },
@@ -3526,6 +3593,10 @@ const OptionDef options[] = {
         "set the subtitle options to the indicated preset", "preset" },
     { "fpre", HAS_ARG | OPT_EXPERT| OPT_PERFILE | OPT_OUTPUT,                { .func_arg = opt_preset },
         "set options from indicated preset file", "filename" },
+
+    { "max_muxing_queue_size", HAS_ARG | OPT_INT | OPT_SPEC | OPT_EXPERT | OPT_OUTPUT, { .off = OFFSET(max_muxing_queue_size) },
+        "maximum number of packets that can be buffered while waiting for all streams to initialize", "packets" },
+
     /* data codec support */
     { "dcodec", HAS_ARG | OPT_DATA | OPT_PERFILE | OPT_EXPERT | OPT_INPUT | OPT_OUTPUT, { .func_arg = opt_data_codec },
         "force data codec ('copy' to copy stream)", "codec" },
